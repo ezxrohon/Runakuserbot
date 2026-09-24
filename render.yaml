@@ -1,0 +1,32 @@
+services:
+  - type: web
+    name: runak-userbot
+    runtime: python
+    plan: free
+    region: singapore
+    buildCommand: pip install -r requirements.txt
+    startCommand: python main.py
+    healthCheckPath: /healthz
+    envVars:
+      - key: PYTHON_VERSION
+        value: 3.12.3
+      # ── secrets: paste them in the Render dashboard (never commit them) ──
+      - key: API_ID
+        sync: false
+      - key: API_HASH
+        sync: false
+      - key: TELEGRAM_SESSION
+        sync: false
+      - key: BOT_TOKEN
+        sync: false
+      - key: GROQ_API_KEY        # optional, only for the AI plugin
+        sync: false
+      # ── settings ──
+      - key: GROQ_MODEL
+        value: llama-3.3-70b-versatile
+      - key: PREFIX
+        value: "."
+      - key: TIMEZONE
+        value: UTC               # e.g. Asia/Kolkata
+      - key: KEEPALIVE
+        value: "1"               # 0 = don't self-ping (the service may then sleep)
