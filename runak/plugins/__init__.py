@@ -1,8 +1,8 @@
-"""Curated native plugins.
+"""Native plugin registry.
 
-Every module in this list uses the shared Runak context.  Legacy plugins that
-created their own Telethon clients or imported a different userbot framework
-are intentionally not loaded.
+Only modules implementing the shared Runak context are loaded.  Legacy
+Pyrogram/CipherElite modules are intentionally not imported because they cannot
+work in this Telethon application.
 """
 from . import (
     core,
@@ -16,6 +16,8 @@ from . import (
     shayari,
     clone,
     animation1,
+    animation4,
+    animation5,
     flashvault,
     fonts,
     love,
@@ -27,5 +29,6 @@ from . import (
 
 ALL = [
     core, afk, ai, tools, notes, remind, purge, sticker, shayari, clone,
-    animation1, flashvault, fonts, love, namestyle, raid, spam, trolls,
+    animation1, animation4, animation5, flashvault, fonts, love, namestyle,
+    raid, spam, trolls,
 ]
