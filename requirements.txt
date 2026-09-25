@@ -1,0 +1,4 @@
+Telethon>=1.40.0,<2
+httpx>=0.27,<1
+tzdata
+firebase-admin>=6.5,<7
