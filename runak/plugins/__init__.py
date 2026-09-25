@@ -1,5 +1,31 @@
-"""Curated plugin list. Plugins are loaded from this fixed list only —
-there is no remote installer and no auto-updater, by design."""
-from . import core, afk, ai, tools, notes, remind, purge, sticker, shayari, clone
+"""Curated native plugins.
 
-ALL = [core, afk, ai, tools, notes, remind, purge, sticker, shayari, clone]
+Every module in this list uses the shared Runak context.  Legacy plugins that
+created their own Telethon clients or imported a different userbot framework
+are intentionally not loaded.
+"""
+from . import (
+    core,
+    afk,
+    ai,
+    tools,
+    notes,
+    remind,
+    purge,
+    sticker,
+    shayari,
+    clone,
+    animation1,
+    flashvault,
+    fonts,
+    love,
+    namestyle,
+    raid,
+    spam,
+    trolls,
+)
+
+ALL = [
+    core, afk, ai, tools, notes, remind, purge, sticker, shayari, clone,
+    animation1, flashvault, fonts, love, namestyle, raid, spam, trolls,
+]
