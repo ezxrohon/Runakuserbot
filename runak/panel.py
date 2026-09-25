@@ -22,7 +22,7 @@ def setup(bot, ctxs: list, add_account=None):
     owner_ids = {c.me.id for c in ctxs}
     if cfg.OWNER_ID:
         owner_ids.add(cfg.OWNER_ID)
-    awaiting = {}  # owner_id -> (account_index, field)
+    awaiting = {}  # owner_id -> (account_index, field) — what free-text input we're waiting for
 
     def onoff(flag: bool) -> str:
         return "✅ ON" if flag else "❌ OFF"
@@ -46,6 +46,8 @@ def setup(bot, ctxs: list, add_account=None):
             [Button.inline("⏰ Reminders", f"a:{i}:reminders".encode()), Button.inline("📖 Commands", f"a:{i}:commands".encode())],
             [Button.inline("ℹ️ About", f"a:{i}:about".encode()), Button.inline("♻️ Restart", f"a:{i}:restart".encode())],
         ]
+        if add_account is not None:
+            rows.append([Button.inline("➕ Add account", b"account:add")])
         if len(ctxs) > 1:
             rows.append([Button.inline("🔀 Switch account", b"accounts")])
         return text, rows
@@ -108,6 +110,7 @@ def setup(bot, ctxs: list, add_account=None):
 
     def reminders(ctx, i):
         from .plugins.remind import local_time
+
         items = ctx.store.data["reminders"]
         lines = [f"`{n}.` {local_time(r['due'])} — {r['text']}" for n, r in enumerate(items, 1)]
         text = "**⏰ Reminders**\n" + ("\n".join(lines) if lines else "None pending.")
@@ -133,8 +136,10 @@ def setup(bot, ctxs: list, add_account=None):
             [Button.inline("Yes, restart", b"restart:yes"), Button.inline("Cancel", f"a:{i}:home".encode())]
         ]
 
-    views = {"home": home, "status": status, "plugins": plugins, "ai": ai, "afk": afk,
-             "reminders": reminders, "commands": commands, "about": about, "restart": restart}
+    views = {
+        "home": home, "status": status, "plugins": plugins, "ai": ai, "afk": afk,
+        "reminders": reminders, "commands": commands, "about": about, "restart": restart,
+    }
 
     async def show(event, ctx, i, key):
         text, buttons = views[key](ctx, i)
@@ -156,7 +161,10 @@ def setup(bot, ctxs: list, add_account=None):
             await event.respond(f"**{BRAND}**\nThis panel is private.")
             return
         awaiting.pop(event.sender_id, None)
-        text, buttons = home(ctxs[0], 0) if len(ctxs) == 1 else accounts_view()
+        if len(ctxs) == 1:
+            text, buttons = home(ctxs[0], 0)
+        else:
+            text, buttons = accounts_view()
         await event.respond(text, buttons=buttons)
 
     @bot.on(events.CallbackQuery())
@@ -165,6 +173,7 @@ def setup(bot, ctxs: list, add_account=None):
             await event.answer("This panel is private.", alert=True)
             return
         data = event.data.decode()
+
         if data == "noop":
             await event.answer("Core can't be switched off.")
             return
@@ -175,7 +184,10 @@ def setup(bot, ctxs: list, add_account=None):
         if data == "account:add" and add_account is not None:
             awaiting[event.sender_id] = (0, "session")
             await event.answer()
-            await event.respond("🔐 Send the StringSession for your own Telegram account as your next message. It will be used only to connect this process; never share it with anyone else.")
+            await event.respond(
+                "🔐 Send the StringSession for your own Telegram account as your next message. "
+                "It will be used only to connect this process; never share it with anyone else."
+            )
             return
         if data == "restart:yes":
             await event.answer("Restarting…")
@@ -187,12 +199,14 @@ def setup(bot, ctxs: list, add_account=None):
             os._exit(0)
         if not data.startswith("a:"):
             return
+
         _, idx_str, action = data.split(":", 2)
         i = int(idx_str)
         if i >= len(ctxs):
             await event.answer("That account is no longer connected.", alert=True)
             return
         ctx = ctxs[i]
+
         if action == "tg:ai" and not ctx.enabled("ai") and not cfg.GROQ_API_KEY:
             await event.answer("Set GROQ_API_KEY first.", alert=True)
             return
@@ -216,15 +230,15 @@ def setup(bot, ctxs: list, add_account=None):
             await show(event, ctx, i, "afk")
             return
         if action == "ai:scope":
-            data = ctx.store.data["ai"]
-            data["scope"] = "everyone" if data.get("scope", "contacts") == "contacts" else "contacts"
+            ai_data = ctx.store.data["ai"]
+            ai_data["scope"] = "everyone" if ai_data.get("scope", "contacts") == "contacts" else "contacts"
             ctx.store.save_soon()
             await event.answer("Updated")
             await show(event, ctx, i, "ai")
             return
         if action == "ai:smallcaps":
-            data = ctx.store.data["ai"]
-            data["smallcaps"] = not data.get("smallcaps", True)
+            ai_data = ctx.store.data["ai"]
+            ai_data["smallcaps"] = not ai_data.get("smallcaps", True)
             ctx.store.save_soon()
             await event.answer("Updated")
             await show(event, ctx, i, "ai")
@@ -259,8 +273,12 @@ def setup(bot, ctxs: list, add_account=None):
             return
         i, field = pending
         awaiting.pop(event.sender_id, None)
+
         if field == "session":
-            if len(text) > 500 or any(ch.isspace() for ch in text) or "," in text:
+            if not add_account:
+                await event.respond("❌ Add-account is unavailable in this build.")
+                return
+            if not text or " " in text or "," in text:
                 await event.respond("❌ That does not look like a valid StringSession. Nothing was connected.")
                 return
             try:
@@ -271,8 +289,12 @@ def setup(bot, ctxs: list, add_account=None):
             if new_ctx is None:
                 await event.respond("❌ Could not connect that session. Verify it belongs to your account and is authorized.")
             else:
-                await event.respond(f"✅ Account **{account_label(new_ctx)}** connected.", buttons=[[Button.inline("👥 Accounts", b"accounts")]])
+                await event.respond(
+                    f"✅ Account **{account_label(new_ctx)}** connected.",
+                    buttons=[[Button.inline("👥 Accounts", b"accounts")]],
+                )
             return
+
         ctx = ctxs[i]
         if field == "prompt":
             ctx.store.data["ai"]["prompt"] = text[:1500]
