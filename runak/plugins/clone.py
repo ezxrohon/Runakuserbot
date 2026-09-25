@@ -1,22 +1,3 @@
-# =============================================================================
-#  CipherElite Userbot Plugin
-#
-#  Plugin Name:    clone
-#  Version:        1.0.0
-#  Author:         CipherElite Dev (@rishabhops)
-#  Repository:     https://github.com/rishabhops/CipherElite
-#
-#  License:        MIT
-#
-#  IMPORTANT:
-#    • If you copy, fork, or include this plugin in your own bot,
-#      you MUST keep this header intact.
-#    • You MUST give proper credit to the CipherElite Userbot author:
-#      – GitHub:    https://github.com/rishabhops/CipherElite
-#      – Telegram:  @thanosceo
-#
-#  Thank you for respecting open-source software!
-# =============================================================================
 
 from telethon import events
 from telethon.tl import functions, types
