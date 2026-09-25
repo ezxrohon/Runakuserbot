@@ -12,17 +12,19 @@ import httpx
 
 from .. import config as cfg
 from ..context import say
+from ..helpers import small_caps
 
 log = logging.getLogger("runak.ai")
 
 NAME = "ai"
 TITLE = "🤖 AI Auto-Reply"
-DESC = "Friendly AI replies in private chats (needs GROQ_API_KEY)."
+DESC = "Friendly AI replies in private chats, sent in ꜱᴍᴀʟʟ ᴄᴀᴘꜱ by default (needs GROQ_API_KEY)."
 DEFAULT_ON = False
 TOGGLE = True
 COMMANDS = [
     ("ai on|off|status", "Switch AI replies"),
     ("ai scope contacts|everyone", "Who gets AI replies"),
+    ("ai smallcaps on|off", "Send AI replies in small caps"),
     ("ask <question>", "Ask the AI something privately"),
     ("setprompt <text>", "Change the AI personality"),
     ("resetprompt", "Restore the default personality"),
@@ -44,6 +46,12 @@ def setup(ctx):
 
     def scope() -> str:
         return ctx.store.data["ai"].get("scope", "contacts")
+
+    def smallcaps_on() -> bool:
+        return bool(ctx.store.data["ai"].get("smallcaps", True))
+
+    def render(answer: str) -> str:
+        return small_caps(answer) if smallcaps_on() else answer
 
     async def ask(uid, text: str, remember: bool = True) -> str:
         past = list(history[uid]) if remember else []
@@ -79,9 +87,17 @@ def setup(ctx):
             ctx.store.data["ai"]["scope"] = parts[1]
             ctx.store.save_soon()
             await say(event, f"🤖 AI scope: **{parts[1]}**.")
+        elif choice == "smallcaps" and len(parts) > 1 and parts[1] in ("on", "off"):
+            ctx.store.data["ai"]["smallcaps"] = parts[1] == "on"
+            ctx.store.save_soon()
+            await say(event, f"🤖 AI small caps: **{parts[1].upper()}**.")
         else:
             state = "ON" if ctx.enabled(NAME) else "OFF"
-            await say(event, f"🤖 AI replies: **{state}**\nScope: **{scope()}**\nModel: `{cfg.GROQ_MODEL}`")
+            await say(
+                event,
+                f"🤖 AI replies: **{state}**\nScope: **{scope()}**\n"
+                f"Small caps: **{'ON' if smallcaps_on() else 'OFF'}**\nModel: `{cfg.GROQ_MODEL}`",
+            )
 
     @ctx.command(NAME, "ask", always=True)
     async def ask_cmd(event, arg):
@@ -98,7 +114,7 @@ def setup(ctx):
             log.warning("AI ask failed: %s", type(exc).__name__)
             await say(event, "❌ The AI service didn't answer. Try again later.")
             return
-        await say(event, answer[:4000], md=False)
+        await say(event, render(answer)[:4000], md=False)
 
     @ctx.command(NAME, "setprompt", always=True)
     async def set_prompt(event, arg):
@@ -143,5 +159,6 @@ def setup(ctx):
             except Exception as exc:
                 log.warning("AI reply failed: %s", type(exc).__name__)
                 return
+            answer = render(answer)
             for i in range(0, len(answer), 4000):
                 await event.respond(answer[i : i + 4000])
