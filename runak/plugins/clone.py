@@ -1,4 +1,3 @@
-
 from telethon import events
 from telethon.tl import functions, types
 from telethon.tl.functions.users import GetFullUserRequest
