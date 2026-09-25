@@ -4,7 +4,7 @@ import logging
 import os
 import tempfile
 
-from telethon.tl import functions, types
+from telethon.tl import functions
 from telethon.tl.functions.users import GetFullUserRequest
 
 from ..context import say
@@ -43,22 +43,6 @@ async def _upload_photo(client, path):
     with open(path, "rb") as photo:
         uploaded = await client.upload_file(photo)
     await client(functions.photos.UploadProfilePhotoRequest(file=uploaded))
-
-
-async def _remove_profile_photos(client):
-    photos = await client.get_profile_photos("me")
-    if not photos:
-        return
-    await client(functions.photos.DeletePhotosRequest(
-        id=[
-            types.InputPhoto(
-                id=photo.id,
-                access_hash=photo.access_hash,
-                file_reference=photo.file_reference,
-            )
-            for photo in photos
-        ]
-    ))
 
 
 async def _target_from_event(ctx, event, arg):
@@ -142,8 +126,9 @@ def setup(ctx):
                 last_name=backup.get("last_name", "")[:64],
                 about=backup.get("about", "")[:70],
             ))
-            await _remove_profile_photos(ctx.client)
 
+            # Upload the saved photo without deleting current or previous photos.
+            # Telegram keeps uploaded profile photos in the account's photo history.
             photo_path = backup.get("photo_path")
             if photo_path and os.path.exists(photo_path):
                 await _upload_photo(ctx.client, photo_path)
