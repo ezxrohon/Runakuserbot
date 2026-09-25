@@ -18,7 +18,7 @@ from .helpers import fmt_duration
 log = logging.getLogger("runak.panel")
 
 
-def setup(bot, ctxs: list, add_account=None):
+def setup(bot, ctxs: list, add_account=None, remove_account=None):
     owner_ids = {c.me.id for c in ctxs}
     if cfg.OWNER_ID:
         owner_ids.add(cfg.OWNER_ID)
@@ -34,6 +34,9 @@ def setup(bot, ctxs: list, add_account=None):
     def accounts_view():
         text = f"**{BRAND}**\n_{TAGLINE}_\n\n{len(ctxs)} accounts connected. Choose one:"
         rows = [[Button.inline(f"👤 {account_label(c)}", f"a:{i}:home".encode())] for i, c in enumerate(ctxs)]
+        if remove_account is not None:
+            for i, c in enumerate(ctxs):
+                rows.append([Button.inline(f"🗑 Remove {account_label(c)}", f"a:{i}:remove".encode())])
         if add_account is not None:
             rows.append([Button.inline("➕ Add account", b"account:add")])
         return text, rows
@@ -46,6 +49,8 @@ def setup(bot, ctxs: list, add_account=None):
             [Button.inline("⏰ Reminders", f"a:{i}:reminders".encode()), Button.inline("📖 Commands", f"a:{i}:commands".encode())],
             [Button.inline("ℹ️ About", f"a:{i}:about".encode()), Button.inline("♻️ Restart", f"a:{i}:restart".encode())],
         ]
+        if remove_account is not None:
+            rows.append([Button.inline("🗑 Remove this account", f"a:{i}:remove".encode())])
         if add_account is not None:
             rows.append([Button.inline("➕ Add account", b"account:add")])
         if len(ctxs) > 1:
@@ -202,10 +207,23 @@ def setup(bot, ctxs: list, add_account=None):
 
         _, idx_str, action = data.split(":", 2)
         i = int(idx_str)
-        if i >= len(ctxs):
+        if not 0 <= i < len(ctxs):
             await event.answer("That account is no longer connected.", alert=True)
             return
         ctx = ctxs[i]
+
+        if action == "remove" and remove_account is not None:
+            await event.answer("Removing account…")
+            removed = await remove_account(i)
+            if removed is None:
+                await event.answer("Could not remove that account.", alert=True)
+                return
+            owner_ids.discard(removed.me.id)
+            if not ctxs:
+                await event.respond("⚠️ No accounts remain connected.")
+                return
+            await event.respond("✅ Account removed.", buttons=[[Button.inline("👥 Accounts", b"accounts")]])
+            return
 
         if action == "tg:ai" and not ctx.enabled("ai") and not cfg.GROQ_API_KEY:
             await event.answer("Set GROQ_API_KEY first.", alert=True)

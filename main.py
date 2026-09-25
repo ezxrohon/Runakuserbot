@@ -59,13 +59,23 @@ async def main():
         task.add_done_callback(dynamic_account_tasks.discard)
         return new_ctx
 
+    async def remove_account(index: int):
+        if not 0 <= index < len(ctxs):
+            return None
+        ctx = ctxs.pop(index)
+        for task in list(ctx.tasks):
+            task.cancel()
+        await ctx.store.flush()
+        await ctx.client.disconnect()
+        return ctx
+
     if cfg.BOT_TOKEN:
         try:
             bot = TelegramClient(StringSession(), cfg.API_ID, cfg.API_HASH)
             await bot.start(bot_token=cfg.BOT_TOKEN)
             for ctx in ctxs:
                 ctx.bot = bot
-            panel.setup(bot, ctxs, add_account=add_account)
+            panel.setup(bot, ctxs, add_account=add_account, remove_account=remove_account)
             log.info("Control panel ready: @%s (%d account%s)", (await bot.get_me()).username,
                      len(ctxs), "" if len(ctxs) == 1 else "s")
         except Exception:
