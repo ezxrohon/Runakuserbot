@@ -1,122 +1,48 @@
-from ... import *
-from pyrogram import filters
-
-
-
+"""Native bulk member mention plugin."""
 import asyncio
+from ..context import say
 
-from pyrogram import filters
-from pyrogram.enums import ChatMembersFilter
-from pyrogram.errors import FloodWait
+NAME = "tagall"
+TITLE = "👥 Tag All"
+DESC = "Mention group members and stop an active mention loop."
+DEFAULT_ON = True
+COMMANDS = [("tagall", "Mention all members"), ("cancel", "Stop tag-all")]
+ACTIVE = set()
 
-SPAM_CHATS = []
+
+def _name(user):
+    return getattr(user, "first_name", None) or getattr(user, "username", None) or "User"
 
 
-@app.on_message(
-    filters.command(["tagall"], prefixes=["."])
-     & ~filters.private
-)
-@sudo_users_only
-async def tag_all_users(_, message):
-    if message.chat.id in SPAM_CHATS:
-        return await message.reply_text(
-            "ᴛᴀɢɢɪɴɢ ᴘʀᴏᴄᴇss ɪs ᴀʟʀᴇᴀᴅʏ ʀᴜɴɴɪɴɢ ɪғ ʏᴏᴜ ᴡᴀɴᴛ ᴛᴏ sᴛᴏᴘ sᴏ ᴜsᴇ /cancel"
-        )
-    replied = message.reply_to_message
-    if len(message.command) < 2 and not replied:
-        await message.reply_text(
-            "** ɢɪᴠᴇ sᴏᴍᴇ ᴛᴇxᴛ ᴛᴏ ᴛᴀɢ ᴀʟʟ, ʟɪᴋᴇ »** `@all Hi Friends`"
-        )
-        return
-    if replied:
+def setup(ctx):
+    @ctx.command(NAME, "tagall", "all")
+    async def tagall(event, arg):
+        if event.chat_id in ACTIVE:
+            await say(event, "A tag-all is already running. Use `.cancel`.", md=False)
+            return
+        reply = await event.get_reply_message()
+        text = arg.strip()
+        if not text and not reply:
+            await say(event, "Usage: `.tagall <text>` or reply to a message.", md=False)
+            return
+        ACTIVE.add(event.chat_id)
         try:
-            SPAM_CHATS.append(message.chat.id)
-            usernum = 0
-            usertxt = ""
-            async for m in app.get_chat_members(message.chat.id):
-                if message.chat.id not in SPAM_CHATS:
+            body = (reply.raw_text or reply.message or "") if reply else text
+            batch = []
+            async for user in event.client.iter_participants(event.chat_id):
+                if event.chat_id not in ACTIVE:
                     break
-                usernum += 1
-                usertxt += f"[{m.user.first_name}](tg://user?id={m.user.id})"
-                if usernum == 14:
-                    await app.send_message(
-                        message.chat.id,
-                        f"{replied.text}\n\n{usertxt}",
-                        disable_web_page_preview=True,
-                    )
-                    await asyncio.sleep(1)
-                    usernum = 0
-                    usertxt = ""
+                batch.append(f"[{_name(user)}](tg://user?id={user.id})")
+                if len(batch) >= 14:
+                    await event.respond(f"{body}\n\n{' '.join(batch)}", parse_mode="md")
+                    batch.clear()
+                    await asyncio.sleep(1.2)
+            if batch and event.chat_id in ACTIVE:
+                await event.respond(f"{body}\n\n{' '.join(batch)}", parse_mode="md")
+        finally:
+            ACTIVE.discard(event.chat_id)
 
-        except FloodWait as e:
-            await asyncio.sleep(e.value)
-        try:
-            SPAM_CHATS.remove(message.chat.id)
-        except Exception:
-            pass
-    else:
-        try:
-            text = message.text.split(None, 1)[1]
-            SPAM_CHATS.append(message.chat.id)
-            usernum = 0
-            usertxt = ""
-            async for m in app.get_chat_members(message.chat.id):
-                if message.chat.id not in SPAM_CHATS:
-                    break
-                usernum += 1
-                usertxt += f"[{m.user.first_name}](tg://user?id={m.user.id})"
-                if usernum == 14:
-                    await app.send_message(
-                        message.chat.id,
-                        f"{text}\n{usertxt}",
-                        disable_web_page_preview=True,
-                    )
-                    await asyncio.sleep(2)
-                    usernum = 0
-                    usertxt = ""
-        except FloodWait as e:
-            await asyncio.sleep(e.value)
-        try:
-            SPAM_CHATS.remove(message.chat.id)
-        except Exception:
-            pass
-
-
-
-@app.on_message(
-    filters.command(
-        [
-            "stopmention",
-            "cancel",
-            "cancelmention",
-            "offmention",
-            "mentionoff",
-            "cancelall",
-        ],
-        prefixes=["/", "@"],
-    )
-     & ~filters.private
-)
-@sudo_users_only
-async def cancelcmd(_, message):
-    chat_id = message.chat.id
-    if chat_id in SPAM_CHATS:
-        try:
-            SPAM_CHATS.remove(chat_id)
-        except Exception:
-            pass
-        return await message.reply_text("**ᴛᴀɢɢɪɴɢ ᴘʀᴏᴄᴇss sᴜᴄᴄᴇssғᴜʟʟʏ sᴛᴏᴘᴘᴇᴅ!**")
-
-    else:
-        await message.reply_text("**ɴᴏ ᴘʀᴏᴄᴇss ᴏɴɢᴏɪɴɢ!**")
-        return
-
-
-__NAME__ = "tagall"
-__MENU__ = """
-**Tag all the members one by one
-Or Group By Simple Commands.**
-
-`.tagall` - text/reply ke chat.
-`.cancel` - to stop .tagall.
-"""
+    @ctx.command(NAME, "cancel", "stopall", "offall")
+    async def cancel(event, arg):
+        ACTIVE.discard(event.chat_id)
+        await say(event, "✅ Tag-all stopped.", md=False)

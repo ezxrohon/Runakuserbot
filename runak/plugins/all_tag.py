@@ -1,109 +1,42 @@
-from ... import *
-from pyrogram import filters
+"""Compatibility alias for the historical ``.king`` command."""
+from .tagall import ACTIVE, _name
+from ..context import say
+
+NAME = "all_tag"
+TITLE = "👑 King Mention"
+DESC = "Mention group members with the legacy king command."
+DEFAULT_ON = True
+COMMANDS = [("king", "Mention all members"), ("kingoff", "Stop king mentions")]
 
 
-
-import asyncio
-
-from pyrogram import filters
-from pyrogram.enums import ChatMembersFilter
-from pyrogram.errors import FloodWait
-
-SPAM_CHATS = []
-
-@app.on_message(
-    filters.command(["king"], prefixes=["."])
-     & ~filters.private
-)
-async def tag_all_users(_, message):
-
-    replied = message.reply_to_message
-    if len(message.command) < 2 and not replied:
-        await message.reply_text(
-            "** ɢɪᴠᴇ sᴏᴍᴇ ᴛᴇxᴛ ᴛᴏ ᴛᴀɢ ᴀʟʟ, ʟɪᴋᴇ »** `@all Hi Friends`"
-        )
-        return
-    if replied:
-        SPAM_CHATS.append(message.chat.id)
-        usernum = 0
-        usertxt = ""
-        async for m in app.get_chat_members(message.chat.id):
-            if message.chat.id not in SPAM_CHATS:
-                break
-            usernum += 1
-            usertxt += f"\n⊚ [{m.user.first_name}](tg://user?id={m.user.id})\n"
-            if usernum == 1:
-                await replied.reply_text(usertxt)
-                await asyncio.sleep(2)
-                usernum = 0
-                usertxt = ""
+def setup(ctx):
+    @ctx.command(NAME, "king")
+    async def king(event, arg):
+        # Reuse the native implementation without importing Pyrogram.
+        if event.chat_id in ACTIVE:
+            await say(event, "A mention loop is already running. Use `.kingoff`.", md=False)
+            return
+        if not arg and not await event.get_reply_message():
+            await say(event, "Usage: `.king <text>` or reply to a message.", md=False)
+            return
+        ACTIVE.add(event.chat_id)
         try:
-            SPAM_CHATS.remove(message.chat.id)
-        except Exception:
-            pass
-    else:
-        text = message.text.split(None, 1)[1]
+            reply = await event.get_reply_message()
+            body = (reply.raw_text or reply.message or "") if reply else arg
+            batch = []
+            async for user in event.client.iter_participants(event.chat_id):
+                if event.chat_id not in ACTIVE:
+                    break
+                batch.append(f"[{_name(user)}](tg://user?id={user.id})")
+                if len(batch) >= 14:
+                    await event.respond(f"{body}\n\n{' '.join(batch)}", parse_mode="md")
+                    batch.clear()
+            if batch and event.chat_id in ACTIVE:
+                await event.respond(f"{body}\n\n{' '.join(batch)}", parse_mode="md")
+        finally:
+            ACTIVE.discard(event.chat_id)
 
-        SPAM_CHATS.append(message.chat.id)
-        usernum = 0
-        usertxt = ""
-        async for m in app.get_chat_members(message.chat.id):
-            if message.chat.id not in SPAM_CHATS:
-                break
-            usernum += 1
-            usertxt += f"\n⊚ [{m.user.first_name}](tg://user?id={m.user.id})\n"
-            if usernum == 1:
-                await app.send_message(
-                    message.chat.id,
-                    f"{text}\n{usertxt}\n\n|| ➥ Sᴜᴘᴘᴏʀᴛ Cʜᴀᴛ ʙʏ » @BRANDED_PAID_CC ||",
-                )
-                await asyncio.sleep(2)
-                usernum = 0
-                usertxt = ""
-        try:
-            SPAM_CHATS.remove(message.chat.id)
-        except Exception:
-            pass
-
-
-@app.on_message(
-    filters.command(
-        [
-            "stopmention",
-            "offall",
-            "cancel",
-            "allstop",
-            "stopall",
-            "cancelmention",
-            "offmention",
-            "mentionoff",
-            "alloff",
-            "cancelall",
-            "allcancel",
-        ],
-        prefixes=[".","#"],
-    )
-    & ~filters.private
-)
-async def cancelcmd(_, message):
-    chat_id = message.chat.id
-    if chat_id in SPAM_CHATS:
-        try:
-            SPAM_CHATS.remove(chat_id)
-        except Exception:
-            pass
-        return await message.reply_text("**ᴛᴀɢɢɪɴɢ ᴘʀᴏᴄᴇss sᴜᴄᴄᴇssғᴜʟʟʏ sᴛᴏᴘᴘᴇᴅ!**")
-
-    else:
-        await message.reply_text("**ɴᴏ ᴘʀᴏᴄᴇss ᴏɴɢᴏɪɴɢ!**")
-        return
-
-
-__NAME__ = "king"
-__MENU__ = """
-**king the members one by one
-Or Group By Simple Commands.**
-
-`.king` - text/reply ke chat.
-`.kingoff` - to stop .kingoff.
-"""
+    @ctx.command(NAME, "kingoff", "allstop", "allcancel")
+    async def stop(event, arg):
+        ACTIVE.discard(event.chat_id)
+        await say(event, "✅ King mention stopped.", md=False)
