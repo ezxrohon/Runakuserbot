@@ -1,13 +1,3 @@
-# =============================================================================
-#  CipherElite Userbot Plugin
-#
-#  Plugin Name:    namestyle
-#  Author:         Rishabh Anand (@rishabhops)
-#  Repository:     https://github.com/rishabhops/CipherElite
-#
-#  License:        MIT
-# =============================================================================
-
 from telethon import events
 from utils.utils import CipherElite
 from utils.decorators import rishabh
