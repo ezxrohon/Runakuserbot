@@ -1,8 +1,3 @@
-# =============================================================================
-#  CipherElite Offline Shayari Repository
-#  Author:         CipherElite Dev (@rishabhops)
-# =============================================================================
-
 import random
 from telethon import events
 
