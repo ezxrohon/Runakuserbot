@@ -12,6 +12,7 @@ DEFAULT_ON = True
 COMMANDS = [
     ("stickeron", "Reply to someone's message to auto-sticker them"),
     ("stickeroff", "Reply to someone's message to stop"),
+    ("stickerpack", "Lock replies to a specific Saved Messages sticker pack"),
 ]
 
 MAX_TARGETS = 20          # keep the settings message small
@@ -25,21 +26,64 @@ def _is_sticker(msg) -> bool:
     return any(isinstance(a, DocumentAttributeSticker) for a in (msg.sticker.attributes or []))
 
 
+def _sticker_pack(msg):
+    if not msg or not msg.sticker:
+        return None
+    for attr in (msg.sticker.attributes or []):
+        if not isinstance(attr, DocumentAttributeSticker):
+            continue
+        sticker_set = getattr(attr, "stickerset", None)
+        if sticker_set is None:
+            return None
+        return getattr(sticker_set, "short_name", None) or getattr(sticker_set, "name", None) or getattr(sticker_set, "title", None)
+    return None
+
+
 def setup(ctx):
     targets = lambda: ctx.store.data["sticker"]["targets"]  # noqa: E731
-    _cache = {"docs": [], "at": 0.0}
+    pack = lambda: ctx.store.data["sticker"].get("pack")  # noqa: E731
+    _cache = {}
 
-    async def _saved_stickers():
-        """Document objects for every sticker found in Saved Messages (cached briefly)."""
-        if _cache["docs"] and time.time() - _cache["at"] < CACHE_TTL:
-            return _cache["docs"]
+    async def _saved_stickers(selected_pack=None):
+        """Document objects for every sticker found in Saved Messages, optionally filtered to one pack."""
+        key = selected_pack or "all"
+        entry = _cache.get(key)
+        if entry and time.time() - entry["at"] < CACHE_TTL:
+            return entry["docs"]
+
         docs = []
         async for msg in ctx.client.iter_messages("me", limit=SCAN_LIMIT):
-            if _is_sticker(msg):
-                docs.append(msg.sticker)
-        _cache["docs"] = docs
-        _cache["at"] = time.time()
+            if not _is_sticker(msg):
+                continue
+            if selected_pack and _sticker_pack(msg) != selected_pack:
+                continue
+            docs.append(msg.sticker)
+
+        _cache[key] = {"docs": docs, "at": time.time()}
         return docs
+
+    @ctx.command(NAME, "stickerpack")
+    async def choose_pack(event, arg):
+        arg = (arg or "").strip().lower()
+        if arg in {"off", "clear", "reset", "none"}:
+            ctx.store.data["sticker"].pop("pack", None)
+            ctx.store.save_soon()
+            await say(event, "🎟 Auto-sticker uses all saved stickers again.")
+            return
+        if not event.is_reply:
+            await say(event, "🎟 Reply to a sticker from your Saved Messages, then send `.stickerpack` to lock replies to that pack.\nOr send `.stickerpack clear` to reset it.")
+            return
+        replied = await event.get_reply_message()
+        if not _is_sticker(replied):
+            await say(event, "❌ Reply to a sticker from your Saved Messages.")
+            return
+        selected = _sticker_pack(replied)
+        if not selected:
+            await say(event, "❌ That sticker is not linked to a sticker pack.")
+            return
+        ctx.store.data["sticker"]["pack"] = selected
+        ctx.store.save_soon()
+        await say(event, f"🎟 **Sticker pack fixed** to `{selected}`.\nAuto-replies will choose only from that pack.")
 
     @ctx.command(NAME, "stickeron")
     async def on(event, arg):
@@ -52,7 +96,10 @@ def setup(ctx):
             await say(event, "❌ Couldn't find that user.")
             return
 
-        docs = await _saved_stickers()
+        selected_pack = pack()
+        docs = await _saved_stickers(selected_pack)
+        if not docs and selected_pack:
+            docs = await _saved_stickers()
         if not docs:
             await say(event, "❌ No stickers found in your Saved Messages. Save a few stickers there first.")
             return
@@ -95,7 +142,10 @@ def setup(ctx):
         sender = await ctx.human_sender(event)
         if not sender or sender.id not in targets():
             return
-        docs = await _saved_stickers()
+        selected_pack = pack()
+        docs = await _saved_stickers(selected_pack)
+        if not docs and selected_pack:
+            docs = await _saved_stickers()
         if not docs:
             return
         try:
