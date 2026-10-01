@@ -728,7 +728,6 @@ def setup(ctx):
         )
 
         chat_locked = chat_id in st["lock_chats"]
-
         if (
             spam_hit
             or raid_hit
