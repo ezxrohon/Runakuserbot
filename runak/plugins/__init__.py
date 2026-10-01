@@ -4,7 +4,7 @@ from . import (
     animation1, animation4, animation5, flashvault, fonts, love, namestyle,
     raid, spam, trolls, animation, autoreact, broadcast, tagall, all_tag,
     plugin_menu, arts, emojify, funarts, memestext, Playstore, ghostvault,
-    install, controller_features,
+    install, controller_features,auth,
 )
 
 ALL = [
@@ -12,5 +12,5 @@ ALL = [
     animation1, animation4, animation5, flashvault, fonts, love, namestyle,
     raid, spam, trolls, animation, autoreact, broadcast, tagall, all_tag,
     plugin_menu, arts, emojify, funarts, memestext, Playstore, ghostvault,
-    install, controller_features,
+    install, controller_features,auth,
 ]
