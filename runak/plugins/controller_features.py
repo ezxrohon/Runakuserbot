@@ -732,5 +732,4 @@ def setup(ctx):
             spam_hit
             or raid_hit
             or targeted_mute
-            o
         )
