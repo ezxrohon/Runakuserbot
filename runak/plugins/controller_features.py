@@ -733,4 +733,55 @@ def setup(ctx):
             spam_hit
             or raid_hit
             or targeted_mute
+            or targeted_lock
+            or chat_muted
+            or global_dm_mute
+            or chat_locked
+        ):
+            try:
+                await event.delete()
+            except Exception:
+                pass
+
+            if targeted_lock or raid_hit:
+                await _restrict(
+                    ctx,
+                    event,
+                    sender_id,
+                    seconds=600,
+                )
+
+            return
+
+        # Targeted reply.
+        should_reply = (
+            sender_id in st["targets"]["reply"]
+            or chat_id in st["reply_chats"]
+        )
+
+        if not should_reply:
+            return
+
+        # Prevent reply loops and excessive automated replies.
+        last_reply = st["last_reply"].get(chat_id, 0)
+
+        if now - last_reply < 2.5:
+            return
+
+        if event.is_private:
+            index = st["dm_index"][chat_id] % 5
+            st["dm_index"][chat_id] += 1
+            message = st["dm"][index]
+        else:
+            index = st["gc_index"][chat_id] % 5
+            st["gc_index"][chat_id] += 1
+            message = st["gc"][index]
+
+        try:
+            await asyncio.sleep(0.2)
+            await event.reply(message)
+            st["last_reply"][chat_id] = time.time()
+        except Exception:
+            pass
+            or targeted_mute
             o
