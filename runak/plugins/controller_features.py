@@ -783,5 +783,3 @@ def setup(ctx):
             st["last_reply"][chat_id] = time.time()
         except Exception:
             pass
-            or targeted_mute
-            o
