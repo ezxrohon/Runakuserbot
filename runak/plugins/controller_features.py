@@ -733,3 +733,4 @@ def setup(ctx):
             or raid_hit
             or targeted_mute
             o
+        )
