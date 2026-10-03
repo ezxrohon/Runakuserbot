@@ -1,0 +1,411 @@
+"""Control panel: a normal Telegram bot (from @BotFather) that only YOU can use.
+
+Send /start to your bot to open it. Everything is inline buttons. Works the same whether
+you're running one account or several — with several, /start opens an account switcher first.
+"""
+import logging
+import os
+import platform
+import time
+
+from telethon import Button, events
+
+from . import __version__
+from . import config as cfg
+from .branding import BRAND, TAGLINE
+from . import access, helpmenu
+from .helpers import fmt_duration
+
+log = logging.getLogger("runak.panel")
+
+
+def setup(bot, ctxs: list, add_account=None, remove_account=None):
+    access.init(ctxs)
+    owner_ids = {c.me.id for c in ctxs}
+    if cfg.OWNER_ID:
+        owner_ids.add(cfg.OWNER_ID)
+    awaiting = {}  # owner_id -> (account_index, field) — what free-text input we're waiting for
+
+    def onoff(flag: bool) -> str:
+        return "✅ ON" if flag else "❌ OFF"
+
+    def account_label(ctx) -> str:
+        name = ctx.me.first_name or str(ctx.me.id)
+        return f"@{ctx.me.username}" if ctx.me.username else name
+
+    def accounts_view():
+        text = f"**{BRAND}**\n_{TAGLINE}_\n\n{len(ctxs)} accounts connected. Choose one:"
+        rows = [[Button.inline(f"👤 {account_label(c)}", f"a:{i}:home".encode())] for i, c in enumerate(ctxs)]
+        if remove_account is not None:
+            for i, c in enumerate(ctxs):
+                rows.append([Button.inline(f"🗑 Remove {account_label(c)}", f"a:{i}:remove".encode())])
+        if add_account is not None:
+            rows.append([Button.inline("➕ Add account", b"account:add")])
+        return text, rows
+
+    def home(ctx, i):
+        text = (
+            f"**╭━━━ 🫧🦋 {BRAND} ━━━╮**\n"
+            f"**┃** 👤 `{account_label(ctx)}`\n"
+            f"**┃** 💎 `P R E M I U M   C O N T R O L`\n"
+            f"**╰━━━━━━━━━━━━━━━━━━╯**\n\n"
+            f"✨ **CATEGORY MATRIX**\n"
+            f"`Choose a square-style category below.`"
+        )
+        # Compact 2-column category matrix. Telegram renders each cell as an
+        # equal-width inline button, giving the panel a square-card appearance.
+        rows = [
+            [Button.inline("📊\nSTATUS", f"a:{i}:status".encode()), Button.inline("🧩\nPLUGINS", f"a:{i}:plugins".encode())],
+            [Button.inline("🤖\nAI REPLY", f"a:{i}:ai".encode()), Button.inline("🌙\nAFK", f"a:{i}:afk".encode())],
+            [Button.inline("⏰\nREMINDERS", f"a:{i}:reminders".encode()), Button.inline("📖\nCOMMANDS", f"a:{i}:commands".encode())],
+            [Button.inline("💠\nABOUT", f"a:{i}:about".encode()), Button.inline("♻️\nRESTART", f"a:{i}:restart".encode())],
+        ]
+        if remove_account is not None:
+            rows.append([Button.inline("🗑 Remove this account", f"a:{i}:remove".encode())])
+        if add_account is not None:
+            rows.append([Button.inline("➕ Add account", b"account:add")])
+        if len(ctxs) > 1:
+            rows.append([Button.inline("🔀 Switch account", b"accounts")])
+        return text, rows
+
+    def status(ctx, i):
+        on = sum(1 for m in ctx.registry if ctx.is_enabled(m))
+        afk = ctx.store.data["afk"]
+        text = (
+            f"**{BRAND} — Status**\n\n"
+            f"👤 {ctx.me.first_name or 'You'} (`{ctx.me.id}`)\n"
+            f"⏱ Uptime: `{fmt_duration(time.time() - ctx.started)}`\n"
+            f"🐍 Python `{platform.python_version()}`\n"
+            f"🧩 Plugins on: **{on}/{len(ctx.registry)}**\n"
+            f"🤖 AI: {onoff(ctx.enabled('ai'))}\n"
+            f"🌙 AFK: {onoff(afk['on'])}\n"
+            f"📝 Notes: **{len(ctx.store.data['notes'])}** · ⏰ Reminders: **{len(ctx.store.data['reminders'])}**\n"
+            f"💾 Storage: {'Firestore' if ctx.store._doc is not None else 'Saved Messages'}"
+        )
+        return text, [[Button.inline("⬅️ Back", f"a:{i}:home".encode())]]
+
+    def plugins(ctx, i):
+        rows = []
+        cells = []
+        for m in ctx.registry:
+            if getattr(m, "LOCKED", False):
+                label, data = f"🔒\n{m.TITLE[:16]}", b"noop"
+            else:
+                mark = "🟢" if ctx.is_enabled(m) else "⚫"
+                label, data = f"{mark}\n{m.TITLE[:16]}", f"a:{i}:tg:{m.NAME}".encode()
+            cells.append(Button.inline(label, data))
+        for n in range(0, len(cells), 2):
+            rows.append(cells[n:n+2])
+        rows.append([Button.inline("⬅️  BACK TO CONTROL", f"a:{i}:home".encode())])
+        return "**╭━━━ 🧩 PLUGIN MATRIX ━━━╮**\n✨ Square-style 2-column module cards.\n🟢 ON  •  ⚫ OFF  •  🔒 LOCKED", rows
+
+    def ai(ctx, i):
+        warn = "" if cfg.GROQ_API_KEY else "\n⚠️ `GROQ_API_KEY` is not set."
+        data = ctx.store.data["ai"]
+        scope = data.get("scope", "contacts")
+        small = bool(data.get("smallcaps", True))
+        text = (
+            f"**🤖 AI Auto-Reply** — {onoff(ctx.enabled('ai'))}\n"
+            f"Model: `{cfg.GROQ_MODEL}`\nReplies in private chats only.{warn}\n"
+            f"Who gets replies: **{'saved contacts only' if scope == 'contacts' else 'everyone'}**\n"
+            f"ꜱᴍᴀʟʟ ᴄᴀᴘꜱ: **{'ON' if small else 'OFF'}**\n\n"
+            f"Personality:\n`{(data.get('prompt') or cfg.DEFAULT_PROMPT)[:300]}`"
+        )
+        return text, [
+            [Button.inline("Switch ON/OFF", f"a:{i}:tg:ai".encode())],
+            [Button.inline("👥 Contacts only ⇄ Everyone", f"a:{i}:ai:scope".encode())],
+            [Button.inline("🔡 Small caps ⇄", f"a:{i}:ai:smallcaps".encode())],
+            [Button.inline("✏️ Set personality", f"a:{i}:ask:prompt".encode()), Button.inline("↩️ Reset", f"a:{i}:ai:reset".encode())],
+            [Button.inline("⬅️ Back", f"a:{i}:home".encode())],
+        ]
+
+    def afk(ctx, i):
+        a = ctx.store.data["afk"]
+        text = f"**🌙 AFK** — {onoff(a['on'])}\nReason: {a['reason'] or '—'}"
+        return text, [
+            [Button.inline("Switch ON/OFF", f"a:{i}:afk:toggle".encode())],
+            [Button.inline("✏️ Set reason", f"a:{i}:ask:afk".encode())],
+            [Button.inline("⬅️ Back", f"a:{i}:home".encode())],
+        ]
+
+    def reminders(ctx, i):
+        from .plugins.remind import local_time
+
+        items = ctx.store.data["reminders"]
+        lines = [f"`{n}.` {local_time(r['due'])} — {r['text']}" for n, r in enumerate(items, 1)]
+        text = "**⏰ Reminders**\n" + ("\n".join(lines) if lines else "None pending.")
+        rows = [[Button.inline("🗑 Clear all", f"a:{i}:rem:clear".encode())]] if items else []
+        rows.append([Button.inline("⬅️ Back", f"a:{i}:home".encode())])
+        return text, rows
+
+    def commands(ctx, i):
+        return ctx.help_text(), [[Button.inline("⬅️ Back", f"a:{i}:home".encode())]]
+
+    def about(ctx, i):
+        text = (
+            f"**{BRAND}** `v{__version__}`\n_{TAGLINE}_\n\n"
+            "🔒 Only your own account(s) can run commands, and only you can use this panel.\n"
+            "🧱 No remote plugin installer, no auto-updater, no hidden admins.\n"
+            "🙈 Secrets are never logged or sent anywhere.\n\n"
+            f"Powered by {BRAND}"
+        )
+        return text, [[Button.inline("⬅️ Back", f"a:{i}:home".encode())]]
+
+    def restart(ctx, i):
+        return "♻️ Restart the userbot now? This restarts **every connected account**.", [
+            [Button.inline("Yes, restart", b"restart:yes"), Button.inline("Cancel", f"a:{i}:home".encode())]
+        ]
+
+    views = {
+        "home": home, "status": status, "plugins": plugins, "ai": ai, "afk": afk,
+        "reminders": reminders, "commands": commands, "about": about, "restart": restart,
+    }
+
+    async def show(event, ctx, i, key):
+        text, buttons = views[key](ctx, i)
+        try:
+            await event.edit(text, buttons=buttons)
+        except Exception:
+            pass
+
+    async def show_accounts(event):
+        text, buttons = accounts_view()
+        try:
+            await event.edit(text, buttons=buttons)
+        except Exception:
+            pass
+
+    async def send_start(event):
+        text, entities = helpmenu.start_card()
+        buttons = helpmenu.start_buttons(event.sender_id in owner_ids)
+        kwargs = {"buttons": buttons}
+        if entities:
+            kwargs["formatting_entities"] = entities
+        else:
+            kwargs["parse_mode"] = None
+        if cfg.START_MEDIA:
+            try:
+                await bot.send_file(event.chat_id, cfg.START_MEDIA, caption=text, **kwargs)
+                return
+            except Exception:
+                log.warning("START_MEDIA could not be sent; falling back to text", exc_info=True)
+        await event.respond(text, **kwargs)
+
+    @bot.on(events.NewMessage(pattern=r"(?i)^/start(?:@\w+)?$", func=lambda e: e.is_private))
+    async def start_public(event):
+        if not access.allowed(event.sender_id):
+            await helpmenu.send_denied(event)
+            return
+        await send_start(event)
+
+    @bot.on(events.NewMessage(pattern=r"(?i)^/help(?:@\w+)?$", func=lambda e: e.is_private))
+    async def help_public(event):
+        if not access.allowed(event.sender_id):
+            await helpmenu.send_denied(event)
+            return
+        text, buttons = helpmenu.help_page(0)
+        await event.respond(text, buttons=buttons)
+
+    @bot.on(events.CallbackQuery(pattern=rb"^(hm|st):"))
+    async def public_callbacks(event):
+        """Help menu + deployer buttons: open to everyone (they only show public info)."""
+        data = event.data.decode()
+        is_owner = event.sender_id in owner_ids
+        if not access.allowed(event.sender_id):
+            await event.answer("You are not authorized to use this bot.", alert=True)
+            return
+        if data == "hm:x":
+            await event.answer()
+            try:
+                await event.delete()
+            except Exception:
+                pass
+            return
+        if data.startswith("hm:p:"):
+            text, buttons = helpmenu.help_page(int(data.split(":")[2]))
+        elif data.startswith("hm:c:"):
+            _, _, key, page = data.split(":")
+            text, buttons = helpmenu.category_page(key, int(page))
+        elif data == "st:login":
+            return  # handled by login.py (open to everyone, with a consent screen)
+        elif data == "st:panel":
+            if not is_owner:
+                await event.answer("This panel is private.", alert=True)
+                return
+            text, buttons = home(ctxs[0], 0) if len(ctxs) == 1 else accounts_view()
+        elif data in ("st:owner", "st:update"):
+            await event.answer("Not configured yet — set OWNER_USERNAME / UPDATE_URL.", alert=True)
+            return
+        else:
+            await event.answer()
+            return
+        await event.answer()
+        try:
+            await event.edit(text, buttons=buttons)
+        except Exception:
+            pass
+
+    @bot.on(events.NewMessage(pattern=r"(?i)^/(panel|menu)(?:@\w+)?$", func=lambda e: e.is_private))
+    async def start(event):
+        if event.sender_id not in owner_ids:
+            await event.respond(f"**{BRAND}**\nThis panel is private.")
+            return
+        awaiting.pop(event.sender_id, None)
+        if len(ctxs) == 1:
+            text, buttons = home(ctxs[0], 0)
+        else:
+            text, buttons = accounts_view()
+        await event.respond(text, buttons=buttons)
+
+    @bot.on(events.CallbackQuery())
+    async def callbacks(event):
+        data = event.data.decode()
+        if data.startswith(("hm:", "st:")):
+            return  # handled by public_callbacks
+        if event.sender_id not in owner_ids:
+            await event.answer("This panel is private.", alert=True)
+            return
+
+        if data == "noop":
+            await event.answer("Core can't be switched off.")
+            return
+        if data == "accounts":
+            await event.answer()
+            await show_accounts(event)
+            return
+        if data == "account:add" and add_account is not None:
+            awaiting[event.sender_id] = (0, "session")
+            await event.answer()
+            await event.respond(
+                "🔐 Send the StringSession for your own Telegram account as your next message. "
+                "It will be used only to connect this process; never share it with anyone else."
+            )
+            return
+        if data == "restart:yes":
+            await event.answer("Restarting…")
+            await event.edit("♻️ Restarting… back in a few seconds.")
+            log.warning("Restart requested from panel")
+            for ctx in ctxs:
+                await ctx.store.flush()
+                await ctx.client.disconnect()
+            os._exit(0)
+        if not data.startswith("a:"):
+            return
+
+        _, idx_str, action = data.split(":", 2)
+        i = int(idx_str)
+        if not 0 <= i < len(ctxs):
+            await event.answer("That account is no longer connected.", alert=True)
+            return
+        ctx = ctxs[i]
+
+        if action == "remove" and remove_account is not None:
+            await event.answer("Removing account…")
+            removed = await remove_account(i)
+            if removed is None:
+                await event.answer("Could not remove that account.", alert=True)
+                return
+            owner_ids.discard(removed.me.id)
+            if not ctxs:
+                await event.respond("⚠️ No accounts remain connected.")
+                return
+            await event.respond("✅ Account removed.", buttons=[[Button.inline("👥 Accounts", b"accounts")]])
+            return
+
+        if action == "tg:ai" and not ctx.enabled("ai") and not cfg.GROQ_API_KEY:
+            await event.answer("Set GROQ_API_KEY first.", alert=True)
+            return
+        if action.startswith("tg:"):
+            name = action[3:]
+            module = next((m for m in ctx.registry if m.NAME == name), None)
+            if module and not getattr(module, "LOCKED", False):
+                ctx.set_enabled(name, not ctx.is_enabled(module))
+            await event.answer("Updated")
+            await show(event, ctx, i, "ai" if name == "ai" else "plugins")
+            return
+        if action == "afk:toggle":
+            a = ctx.store.data["afk"]
+            a["on"] = not a["on"]
+            if a["on"]:
+                a["since"] = int(time.time())
+                a["reason"] = a["reason"] or "I'm away right now. I'll reply when I'm back."
+            ctx.afk_notified.clear()
+            ctx.store.save_soon()
+            await event.answer("Updated")
+            await show(event, ctx, i, "afk")
+            return
+        if action == "ai:scope":
+            ai_data = ctx.store.data["ai"]
+            ai_data["scope"] = "everyone" if ai_data.get("scope", "contacts") == "contacts" else "contacts"
+            ctx.store.save_soon()
+            await event.answer("Updated")
+            await show(event, ctx, i, "ai")
+            return
+        if action == "ai:smallcaps":
+            ai_data = ctx.store.data["ai"]
+            ai_data["smallcaps"] = not ai_data.get("smallcaps", True)
+            ctx.store.save_soon()
+            await event.answer("Updated")
+            await show(event, ctx, i, "ai")
+            return
+        if action == "ai:reset":
+            ctx.store.data["ai"]["prompt"] = None
+            ctx.store.save_soon()
+            await event.answer("Personality reset")
+            await show(event, ctx, i, "ai")
+            return
+        if action == "rem:clear":
+            ctx.store.data["reminders"].clear()
+            ctx.store.save_soon()
+            await event.answer("Cleared")
+            await show(event, ctx, i, "reminders")
+            return
+        if action.startswith("ask:"):
+            awaiting[event.sender_id] = (i, action[4:])
+            await event.answer()
+            hint = "the new AI personality" if action == "ask:prompt" else "your AFK reason"
+            await event.respond(f"✏️ Send {hint} as your next message.")
+            return
+        if action in views:
+            await event.answer()
+            await show(event, ctx, i, action)
+
+    @bot.on(events.NewMessage(func=lambda e: e.is_private and e.sender_id in owner_ids))
+    async def free_text(event):
+        pending = awaiting.get(event.sender_id)
+        text = (event.raw_text or "").strip()
+        if not pending or not text or text.startswith("/"):
+            return
+        i, field = pending
+        awaiting.pop(event.sender_id, None)
+
+        if field == "session":
+            if not add_account:
+                await event.respond("❌ Add-account is unavailable in this build.")
+                return
+            if not text or " " in text or "," in text:
+                await event.respond("❌ That does not look like a valid StringSession. Nothing was connected.")
+                return
+            try:
+                new_ctx = await add_account(text)
+            except Exception:
+                log.exception("Panel account addition failed")
+                new_ctx = None
+            if new_ctx is None:
+                await event.respond("❌ Could not connect that session. Verify it belongs to your account and is authorized.")
+            else:
+                await event.respond(
+                    f"✅ Account **{account_label(new_ctx)}** connected.",
+                    buttons=[[Button.inline("👥 Accounts", b"accounts")]],
+                )
+            return
+
+        ctx = ctxs[i]
+        if field == "prompt":
+            ctx.store.data["ai"]["prompt"] = text[:1500]
+            note = "✅ AI personality updated."
+        else:
+            ctx.store.data["afk"]["reason"] = text[:300]
+            note = "✅ AFK reason updated."
+        ctx.store.save_soon()
+        await event.respond(note, buttons=[[Button.inline("⬅️ Panel", f"a:{i}:home".encode())]])
